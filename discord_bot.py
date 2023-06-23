@@ -1,4 +1,4 @@
-import cexprtk, discord, logging, openai, os
+import cexprtk, logging, openai, os
 from discord import Client, Intents, app_commands
 
 ASKAI_BOT_TOKEN=os.environ['ASKAI_BOT_TOKEN']

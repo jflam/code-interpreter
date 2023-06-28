@@ -15,8 +15,39 @@ plt.ylabel("sin(x)")
 """
 
 from jupyter_client import KernelManager, BlockingKernelClient
+from typing import Tuple
 from queue import Empty
 import base64
+
+def extract_code(response: str) -> Tuple[bool, str]:
+    # If the code contains ```python code block extract it and return
+    # a tuple that contains a boolean and the extracted code
+
+    # Split code into lines
+    lines = response.strip().split("\n")
+
+    # Walk the lines and look for the start of a code block
+    code_block_start = None
+    for i, line in enumerate(lines):
+        if line.startswith("```python"):
+            code_block_start = i
+            break
+
+    # If we found a code block start, walk the lines and look for the end
+    # of the code block
+    if code_block_start is not None:
+        for i, line in enumerate(lines[code_block_start+1:]):
+            if line.startswith("```"):
+                code_block_end = i + code_block_start + 1
+                break
+
+        # If we found a code block end, extract the code and return it
+        if code_block_end is not None:
+            code_lines = lines[code_block_start+1:code_block_end]
+            code = "\n".join(code_lines)
+            return (True, code)
+
+    return (False, "")
 
 def execute_code(kc: BlockingKernelClient, code: str):
     kc.execute(code)

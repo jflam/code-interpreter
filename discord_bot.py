@@ -13,20 +13,6 @@ TEMPERATURE=0.5
 SYSTEM="""
 You are a helpful assistant to a user.
 """
-SAMPLE_CODE="""
-import numpy as np
-import matplotlib.pyplot as plt
-
-x = np.linspace(0, 2*np.pi, 100)
-y = np.sin(x)
-
-plt.figure()
-plt.plot(x, y)
-plt.title("Sine Function")
-plt.xlabel("x")
-plt.ylabel("sin(x)")
-plt.show()
-"""
 
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 
@@ -163,20 +149,6 @@ async def on_message(message):
 
     # Compute the number of tokens and output that
     await message.channel.send("*Thinking*...")
-
-    # # Hard-coded execution of Python code that generates a matplotlib plot
-    # # using the Jupyter Python kernel
-    # mime_type, result, msg = execute_code(kc, SAMPLE_CODE)
-    # current_dir = os.getcwd()
-    # if mime_type == 'image/png':
-    #     file = discord.File(f"{current_dir}/{result}", filename=result)
-    #     embed = discord.Embed()
-    #     embed.set_image(url=f"attachment://{result}")
-    #     await message.channel.send(embed=embed, file=file)
-    # elif mime_type == 'text/plain':
-    #     await message.channel.send(result)
-    # else:
-    #     await message.channel.send("Unknown result from Jupyter kernel")
 
     result = openai.ChatCompletion.create(
         model=MODEL_NAME,

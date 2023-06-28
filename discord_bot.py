@@ -2,6 +2,7 @@ import cexprtk, logging, openai, os, discord
 from discord import Client, Intents, app_commands
 from jupyter_client import KernelManager, BlockingKernelClient
 from queue import Empty
+from typing import Tuple
 import base64
 
 ASKAI_BOT_TOKEN=os.environ['ASKAI_BOT_TOKEN']
@@ -54,11 +55,42 @@ async def calculate(interaction, expression: str):
     except Exception as e:
         await interaction.response.send_message(f"Error: {str(e)}")
 
+def extract_code(response: str) -> Tuple[bool, str]:
+    # If the code contains ```python code block extract it and return
+    # a tuple that contains a boolean and the extracted code
+
+    # Split code into lines
+    lines = response.strip().split("\n")
+
+    # Walk the lines and look for the start of a code block
+    code_block_start = None
+    for i, line in enumerate(lines):
+        if line.startswith("```python"):
+            code_block_start = i
+            break
+
+    # If we found a code block start, walk the lines and look for the end
+    # of the code block
+    if code_block_start is not None:
+        for i, line in enumerate(lines[code_block_start+1:]):
+            if line.startswith("```"):
+                code_block_end = i + code_block_start + 1
+                break
+
+        # If we found a code block end, extract the code and return it
+        if code_block_end is not None:
+            code_lines = lines[code_block_start+1:code_block_end]
+            code = "\n".join(code_lines)
+            return (True, code)
+
+    return (False, "")
+
 def execute_code(kc: BlockingKernelClient, code: str):
     kc.execute(code)
 
     execute_result = None
     display_data = None 
+    stream = ""
 
     # The result of the execution is 0 or more messages on the 'iopub' channel
     # followed by a status message that says the kernel is now idle (I
@@ -85,6 +117,8 @@ def execute_code(kc: BlockingKernelClient, code: str):
             else:
                 print("WARNING: Unexpected status message")
                 print(message)
+        elif msg_type == 'stream':
+            stream += message['content']['text']
 
     if display_data is not None:
         data_payload = display_data['content']['data']
@@ -98,6 +132,8 @@ def execute_code(kc: BlockingKernelClient, code: str):
         text_data = data_payload.get('text/plain')
         if text_data is not None:
             return ('text/plain', text_data, execute_result)
+    elif stream != "":
+        return ('text/plain', stream, None)
     else:
         raise Exception("No result or display data")
 
@@ -128,19 +164,19 @@ async def on_message(message):
     # Compute the number of tokens and output that
     await message.channel.send("*Thinking*...")
 
-    # Hard-coded execution of Python code that generates a matplotlib plot
-    # using the Jupyter Python kernel
-    mime_type, result, msg = execute_code(kc, SAMPLE_CODE)
-    current_dir = os.getcwd()
-    if mime_type == 'image/png':
-        file = discord.File(f"{current_dir}/{result}", filename=result)
-        embed = discord.Embed()
-        embed.set_image(url=f"attachment://{result}")
-        await message.channel.send(embed=embed, file=file)
-    elif mime_type == 'text/plain':
-        await message.channel.send(result)
-    else:
-        await message.channel.send("Unknown result from Jupyter kernel")
+    # # Hard-coded execution of Python code that generates a matplotlib plot
+    # # using the Jupyter Python kernel
+    # mime_type, result, msg = execute_code(kc, SAMPLE_CODE)
+    # current_dir = os.getcwd()
+    # if mime_type == 'image/png':
+    #     file = discord.File(f"{current_dir}/{result}", filename=result)
+    #     embed = discord.Embed()
+    #     embed.set_image(url=f"attachment://{result}")
+    #     await message.channel.send(embed=embed, file=file)
+    # elif mime_type == 'text/plain':
+    #     await message.channel.send(result)
+    # else:
+    #     await message.channel.send("Unknown result from Jupyter kernel")
 
     result = openai.ChatCompletion.create(
         model=MODEL_NAME,
@@ -148,6 +184,21 @@ async def on_message(message):
         temperature=TEMPERATURE
     )
     response = result.choices[0].message.content
+    # Write response to client
     await message.channel.send(response)
+    has_code, code = extract_code(response)
+    if has_code:
+        # TODO: ask the user if they want to execute code - just execute for now
+        mime_type, result, _ = execute_code(kc, code)
+        current_dir = os.getcwd()
+        if mime_type == 'image/png':
+            file = discord.File(f"{current_dir}/{result}", filename=result)
+            embed = discord.Embed()
+            embed.set_image(url=f"attachment://{result}")
+            await message.channel.send(embed=embed, file=file)
+        elif mime_type == 'text/plain':
+            await message.channel.send(result)
+        else:
+            await message.channel.send("Unknown result from Jupyter kernel")
 
 client.run(ASKAI_BOT_TOKEN)

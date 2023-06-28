@@ -1,4 +1,4 @@
-import cexprtk, logging, openai, os, discord
+import logging, openai, os, discord, cexprtk
 from discord import Client, Intents, app_commands
 from jupyter_client import KernelManager, BlockingKernelClient
 from queue import Empty
@@ -26,6 +26,36 @@ tree = app_commands.CommandTree(client)
 km = KernelManager()
 km.start_kernel()
 kc = km.client(block=True)
+
+# Define a simple View that gives us a confirmation menu. This is a bare-bones
+# example of this kind of interaction. It suffers from a number of problems
+# including:
+# - It doesn't handle timeouts
+# - The yes/no buttons are always visible, even after the user has clicked one
+# - I have to send a response even when the user cancels
+# - I may want the continuation to happen within this class rather than
+#   outside of it. This might be a bit cleaner (or it might be more confusing)
+# None of these are deal breakers at the moment, so let's commit this and
+# move on.
+class Confirm(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        self.value = None
+
+    # When the confirm button is pressed, set the inner value to `True` and
+    # stop the View from listening to more input.
+    # We also send the user an ephemeral message that we're confirming their choice.
+    @discord.ui.button(label='Yes', style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message('Code running', ephemeral=True)
+        self.value = True
+        self.stop()
+
+    @discord.ui.button(label='No', style=discord.ButtonStyle.grey)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message('Execution cancelled', ephemeral=True)
+        self.value = False
+        self.stop()
 
 @client.event 
 async def on_ready():
@@ -125,6 +155,7 @@ def execute_code(kc: BlockingKernelClient, code: str):
 
 @client.event
 async def on_message(message):
+    # Ignore our own messages
     if message.author == client.user:
         return
 
@@ -156,21 +187,36 @@ async def on_message(message):
         temperature=TEMPERATURE
     )
     response = result.choices[0].message.content
-    # Write response to client
-    await message.channel.send(response)
+
+    # Extract the code from the response (if any)
     has_code, code = extract_code(response)
+
+    # Send the full response (including code if any) to the client
+    await message.channel.send(response)
+
+    # If there is code, ask for confirmation before execution
     if has_code:
-        # TODO: ask the user if they want to execute code - just execute for now
-        mime_type, result, _ = execute_code(kc, code)
-        current_dir = os.getcwd()
-        if mime_type == 'image/png':
-            file = discord.File(f"{current_dir}/{result}", filename=result)
-            embed = discord.Embed()
-            embed.set_image(url=f"attachment://{result}")
-            await message.channel.send(embed=embed, file=file)
-        elif mime_type == 'text/plain':
-            await message.channel.send(result)
+        view = Confirm()
+        await message.channel.send('Do you want to run the code?', view=view)
+        await view.wait()
+
+        if view.value is None:
+            print("Timed out...")
+        elif view.value:
+            mime_type, result, _ = execute_code(kc, code)
+            current_dir = os.getcwd()
+            if mime_type == 'image/png':
+                file = discord.File(f"{current_dir}/{result}", filename=result)
+                embed = discord.Embed()
+                embed.set_image(url=f"attachment://{result}")
+                await message.channel.send(embed=embed, file=file)
+            elif mime_type == 'text/plain':
+                embed = discord.Embed(title="Result", description=result)
+                await message.channel.send(result)
+            else:
+                embed = discord.Embed(title="Error", description="Unknown result from Jupyter kernel")
+                await message.channel.send("Unknown result from Jupyter kernel")
         else:
-            await message.channel.send("Unknown result from Jupyter kernel")
+            print("Cancelled...")
 
 client.run(ASKAI_BOT_TOKEN)
